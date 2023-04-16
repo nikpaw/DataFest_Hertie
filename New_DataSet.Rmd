@@ -1,0 +1,294 @@
+---
+title: "New_Dataset"
+author: "Alvaro Guijarro"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Libraries
+
+```{r setup, include=FALSE}
+library(tidyr)
+library(reader)
+library(dplyr)
+library(stringr)
+library(readxl)
+```
+
+##Build the Data Set
+```{r setup, include=FALSE}
+firms <- readr::read_csv2(
+  file = "~/GitHub/DataFest_2023/Data/firmen.csv" # name of file 
+  )
+firms_hist <- readr::read_csv2(
+  file = "~/GitHub/DataFest_2023/Data/firmen_hist.csv" # name of file 
+  )
+
+firms_inaktiv <- readr::read_csv2(
+  file = "~/GitHub/DataFest_2023/Data/firmen_inaktiv.csv" # name of file 
+  )
+```
+
+
+##Select the same columns for each data set
+```{r setup}
+firms_1 <- firms %>%
+               select(firm_id, land, plz, ort, stn_hnr, firmenname, rechtsform, 
+                      amtsgericht_plz,amtsgericht_ort, hr_nummer, hr_nummer_alle, 
+                      hr_nummer_info, gegenstand, wz_code,kapital,waehrung, 
+                      umsatz_staffel, mitarbeiter_staffel, gruendung, 
+                      loeschungs_datum,status)
+
+firms_hist_1 <- firms_hist %>%
+               select(firm_id, land, plz, ort, stn_hnr, firmenname, rechtsform, 
+                      amtsgericht_plz,amtsgericht_ort, hr_nummer, hr_nummer_alle, 
+                      hr_nummer_info, gegenstand, wz_code,kapital,waehrung, 
+                      umsatz_staffel, mitarbeiter_staffel, gruendung, 
+                      loeschungs_datum,status)
+
+firms_inaktiv_1 <- firms_inaktiv %>%
+               select(firm_id, land, plz, ort, stn_hnr, firmenname, rechtsform, 
+                      amtsgericht_plz,amtsgericht_ort, hr_nummer, hr_nummer_alle, 
+                      hr_nummer_info, gegenstand, wz_code,kapital,waehrung, 
+                      umsatz_staffel, mitarbeiter_staffel, gruendung, 
+                      loeschungs_datum,status)
+
+combined <- rbind(firms_1, firms_inaktiv_1, firms_hist_1)
+
+  
+```
+
+```{r}
+# Sort the combined dataset by firm_id
+combined_sorted <- combined %>% 
+  arrange(firm_id) %>%
+  distinct(firm_id, .keep_all = TRUE) %>%
+  filter(!is.na(plz) & !is.na(land) & !is.na(wz_code) & !is.na(mitarbeiter_staffel) & !is.na(gruendung)) %>%
+  mutate(wz_code = str_replace_all(wz_code, "\\{|\\}", ""))
+```
+
+
+#Check how many empty entries do we have 
+```{r setup}
+# Count number of NA values in each column
+na_count <- colSums(is.na(combined_sorted))
+
+# Print the result
+na_count
+```
+
+#Add the 3 first wz_codes
+```{r setup}
+combined_sorted_2 <- combined_sorted %>% 
+  separate(wz_code, into = c("wz_code_1"), sep = ",", remove = FALSE) %>% 
+  mutate(wz_code_1 = str_extract(wz_code_1, "\\d{1,2}"))
+```
+
+# Create reference: postal codes to "Landkreise"
+```{r}
+postal_codes <- readr::read_csv2(
+  file = "~/GitHub/DataFest_2023/Data/georef-germany-postleitzahl.csv")
+
+filtered_postal_codes <- postal_codes %>%
+  filter(`Land name` == "Bayern" | `Land name` == "Baden-Württemberg") %>%
+  rename("plz" = "Postleitzahl / Post code") %>%
+  rename("kreis_name" = "Kreis name") %>%
+  rename("state" = "Land name")
+
+filtered_postal_codes$kreis_name <- gsub("^(Landkreis|Stadtkreis|Kreisfreie Stadt)\\s", "", filtered_postal_codes$kreis_name)
+
+filtered_postal_codes_bawu <- filtered_postal_codes %>% 
+  filter(`state` == "Baden-Württemberg")
+
+merged_df <- merge(combined_sorted_2, filtered_postal_codes, by = "plz")
+
+merged_df_bawu <- merged_df %>% 
+  filter(`state` == "Baden-Württemberg")
+
+# merged_df_bawu$kreis_name <- gsub("^(Landkreis|Stadtkreis)\\s", "", merged_df_bawu$kreis_name)
+
+```
+
+```{r}
+# load cleaned csv of employees per company
+firm_employer <- readr::read_csv2(
+  file = "~/GitHub/DataFest_2023/firm_employer.csv") %>%
+  separate('firm_id,n_employer', into = c("firm_id", "n_employee"), sep = "\\.")
+
+
+# aiming for dataframe containing municipality_name, sector, aggregated_date, [company_name], aggregated_company_size
+testing_wrangled_df <- merged_df %>%
+  select(firm_id, wz_code_1, kreis_name, gruendung, mitarbeiter_staffel)
+
+# change "gruendung" into date time, and aggregate gruendung into grunedungen per month
+testing_wrangled_df <- testing_wrangled_df %>%
+  mutate(gruendung = as.POSIXct(gruendung, format = "%Y-%m-%d")) %>%
+  filter(year(gruendung) >= 2007) %>%
+  mutate(gruendung_year_month = format(gruendung, "%Y-%m")) %>%
+  select(-gruendung) %>%
+  mutate(company_foundations = 1)
+
+
+# Merge dataframes based on firm_id
+testing_wrangled_df <- merge(testing_wrangled_df, firm_employer, by = "firm_id") %>%
+  select(-mitarbeiter_staffel)
+
+#group by wz_code and kreis_name
+testing_wrangled_df_1 <- testing_wrangled_df %>%
+  select(wz_code_1, kreis_name, gruendung_year_month, n_employee, company_foundations) %>%
+  mutate(n_employee = as.numeric(n_employee)) %>%
+  group_by(wz_code_1, kreis_name, gruendung_year_month) %>%
+  summarise(n_employee = sum(n_employee), company_foundations = sum(company_foundations)) %>%
+  ungroup()
+
+```
+
+```{r}
+industries_df <- readxl::read_excel("~/GitHub/DataFest_2023/Data/Industry_Type_by_wz_code.xlsx")
+# needs work
+bay_df_emp <- readr::read_csv2(
+  file = "~/GitHub/DataFest_2023/Data/final_df_bayern.csv")
+
+# needs work
+# remove number before first ",", then separate column by column for it to check that it works
+bw_df_emp <- readr::read_csv2(
+  file = "~/GitHub/DataFest_2023/Data/final_df_badenwurttemberg.csv")
+  # line to remove 
+
+bw_df_emp <- bw_df_emp %>%
+  rename(municipalityORdateORsectorORN_employee = ',municipality,date,sector,N_employee')
+
+bw_df_emp$municipalityORdateORsectorORN_employee <- str_replace(bw_df_emp$municipalityORdateORsectorORN_employee, "^[0-9]+,", "")
+
+bw_df_emp$municipalityORdateORsectorORN_employee <- gsub("^(Landkreis|Stadtkreis|Kreisfreie Stadt|kreis|agentur für arbeit)\\s", "", bw_df_emp$municipalityORdateORsectorORN_employee)
+
+bw_df_emp <- bw_df_emp %>%
+  separate(municipalityORdateORsectorORN_employee, into = c("first_column", "dateORsectorORN_employee"), sep = ",", extra = "merge", fill = "left")
+
+bw_df_emp <- bw_df_emp %>%
+  filter(first_column != "land bayern")
+
+bw_df_emp <- bw_df_emp %>% 
+  separate(dateORsectorORN_employee, into = c("before_last", "N_employee"), sep = ",(?=[^,]*$)")
+
+bw_df_emp <- filter(bw_df_emp, N_employee != "*")
+
+bw_df_emp <- bw_df_emp %>%
+  separate(before_last, into = c("date", "sector"), sep = ",", extra = "merge", fill = "left")
+
+bw_df_emp$sector <- str_extract(bw_df_emp$sector, "\\b[A-Z]")
+
+bw_df_emp <- bw_df_emp %>%
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d")) %>%
+  filter(year(date) >= 2007) %>%
+  mutate(date_year_month = format(date, "%Y-%m")) %>%
+  select(-date)
+
+
+# SAME FOR BAYERN:
+bay_df_emp <- bay_df_emp %>%
+  rename(municipalityORdateORsectorORN_employee = 'municipality,date,sector,N_employee')
+
+bay_df_emp$municipalityORdateORsectorORN_employee <- str_replace(bay_df_emp$municipalityORdateORsectorORN_employee, "^[0-9]+,", "")
+
+bay_df_emp$municipalityORdateORsectorORN_employee <- gsub("^(Landkreis|Stadtkreis|Kreisfreie Stadt|kreis|agentur für arbeit)\\s", "", bay_df_emp$municipalityORdateORsectorORN_employee)
+
+bay_df_emp <- bay_df_emp %>%
+  separate(municipalityORdateORsectorORN_employee, into = c("first_column", "dateORsectorORN_employee"), sep = ",", extra = "merge", fill = "left")
+
+bay_df_emp <- bay_df_emp %>%
+  filter(first_column != "land bayern")
+
+bay_df_emp <- bay_df_emp %>% 
+  separate(dateORsectorORN_employee, into = c("before_last", "N_employee"), sep = ",(?=[^,]*$)")
+
+bay_df_emp <- filter(bay_df_emp, N_employee != "*")
+
+bay_df_emp <- bay_df_emp %>%
+  separate(before_last, into = c("date", "sector"), sep = ",", extra = "merge", fill = "left")
+
+bay_df_emp$sector <- str_extract(bay_df_emp$sector, "\\b[A-Z]")
+
+bay_df_emp <- bay_df_emp %>%
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d")) %>%
+  filter(year(date) >= 2007) %>%
+  mutate(date_year_month = format(date, "%Y-%m")) %>%
+  select(-date)
+
+
+# combine employment data for the states
+merged_df_employment <- rbind(bw_df_emp, bay_df_emp)
+
+
+#  separate('municipality,date,sector,N_employee', into = c())
+```
+
+```{r}
+# combine df merged_df_employment and df testing_wrangled_df_1
+# columns require renaming probably
+# columns merged_df_employment: first_column, sector, N_employee, date_year_month
+# columns testing_wrangled_df_1: wz_code_1, kreis_name, gruendung_year_month, n_employee, company_foundations
+# rename: location, sector, N_employees_employment, date_employment
+merged_df_employment_1.1 <- merged_df_employment %>% rename(location = first_column, sector = sector, N_employees_employment = N_employee, date_employment = date_year_month)
+# rename: location, sector, N_employees_comanies, date_founding
+testing_wrangled_df_1.1 <- testing_wrangled_df_1 %>% rename(location = kreis_name, sector = wz_code_1, N_employees_comanies = n_employee, date_founding = gruendung_year_month)
+
+short_employment_key <- employment_df[, c("wz_code", "A-U Code")]
+
+short_employment_key <- rename(short_employment_key, sector = wz_code)
+
+testing_wrangled_df_1.1$sector <- sub("^0+", "", testing_wrangled_df_1.1$sector)
+
+
+# translate into same format different columns
+testing_wrangled_df_1.1 <- merge(testing_wrangled_df_1.1, short_employment_key, by = "sector", all.x = TRUE)
+
+testing_wrangled_df_1.1 <- subset(testing_wrangled_df_1.1, select = -sector)
+
+testing_wrangled_df_1.1 <- testing_wrangled_df_1.1 %>% rename(sector = 'A-U Code')
+
+testing_wrangled_df_1.1[] <- lapply(testing_wrangled_df_1.1, tolower)
+
+merged_df_employment_1.1[] <- lapply(merged_df_employment_1.1, tolower)
+
+# last step, merge the two:
+final_merged_df <- merge(testing_wrangled_df_1.1, merged_df_employment_1.1, by = c("location", "sector"))
+
+```
+
+```{r}
+
+library(lubridate)
+
+# final_merged_df_added <- final_merged_df_added %>%
+  mutate(date_employment = ymd(date_employment)) %>%
+  mutate(date_employment = floor_date(date_employment, "month")) %>%
+  mutate(date_employment = format(date_employment, "%Y-%m"))
+
+# final_merged_df_added <- final_merged_df_added %>%
+  mutate(date_founding = ymd(date_founding)) %>%
+  mutate(date_founding = floor_date(date_founding, "month")) %>%
+  mutate(date_founding = format(date_founding, "%Y-%m"))
+
+
+# final_merged_df_added <- final_merged_df_added %>%
+             filter(date_employment == date_founding + months(1)) %>% # impact after a month
+             filter(date_employment == date_founding + months(6)) %>% # impact after half a year
+             filter(date_employment == date_founding + years(1))     # impact after a year
+```
+
+
+```{r}
+write.csv(final_merged_df, file = "final_merged_df.csv", row.names = FALSE)
+```
+
+```{r}
+write.csv(combined_sorted_2, file = "combined_sorted_2.csv", row.names = FALSE)
+```
+
+
+
