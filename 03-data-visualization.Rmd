@@ -1,0 +1,217 @@
+---
+title: "DataFest"
+author: "Fernanda Ortega Valencia"
+date: "2023-04-14"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(scales)
+#library(tidyverse)
+library(readr)
+library(readxl)
+library(ggplot2)
+library(purrr)
+library(plotly)
+library(feasts)
+library(tsibble)
+library(lubridate)
+library(tidyverse)
+library(TSstudio)
+library(plotly)
+library(gt)
+library(gtExtras)
+library(kableExtra)
+library(leafdown)
+library(shiny)
+library(shinycssloaders)
+library(shinyjs)
+library(rnaturalearth)
+library(sp)
+library(tigris)
+
+```
+
+
+```{r}
+library(raster)
+germany<-getData('GADM', country='DEU', level=1)
+germany_2<-getData('GADM', country='DEU', level=2)
+
+plot(germany)
+
+bayern_2<- read_csv("C:/Users/feror/OneDrive/GitHub/DataFest_2023/Data/final_df_occupation/final_df_bayern.csv")
+
+
+both<-subset(germany_2,NAME_1=='Bayern' | NAME_1=='Baden-Württemberg')
+plot(both)
+bayern<-(subset(germany_2,NAME_1=='Bayern'))
+plot(bayern)
+
+baden<-(subset(germany_2,NAME_1=='Baden-Württemberg'))
+plot(baden)
+unique(baden$NAME_2)
+
+#both_list <- list(bayern, baden)
+
+#baden_frame<-fortify(baden, region = "NAME_2")
+
+#merged_spdf <- left_join(spdf, df, by = "id")
+
+#my_leafdown <- Leafdown$new(both_list, map_output_id = "leafdown", input = input)
+#gdp<-gdp_2014_admin_districts
+
+#colnames(gdp)[1] <- "NAME_2"
+
+#m<-geo_join(baden, gdp_2014_admin_districts, by = c("NAME_2" = "Admin_District"), how = "left")
+
+bawue_data <- right_join(baden@data, merged_df_bawu, by = "NAME_2")
+bayern_data<-right_join(bayern@data, merged_df_bayern, by = "NAME_2")
+
+both_merge<-right_join(both@data, merged_df, by = "NAME_2")
+
+w<-unique(bayern_data$NAME_2)
+w
+
+Count_bawue<-bawue_data %>% count(NAME_2)
+
+Count_bayern<-merged_df_bayern%>% count(NAME_2)
+
+```
+
+
+```{r}
+library(leaflet)
+library(leaflet.extras2)
+library(sf)
+pal <- colorQuantile("Greens", NULL, n = 5)
+pal_2<-colorQuantile("Blues", NULL, n = 5)
+#germany_center <- c(51.1657, 10.4515)
+
+popup_baden <- paste0("Firms in ", baden$NAME_2, paste0(":  ", as.character(Count_bawue$n)))
+popup_bayern<-paste0("Firms in ", bayern$NAME_2, paste0(":  ", as.character(Count_bayern$n)))
+mymap <- leaflet() %>% 
+  addProviderTiles("Stamen.TonerLite")%>%
+ #setView(lng = germany_center[2], lat = germany_center[1], zoom = 6.5)  %>%
+  
+  addPolygons(data = baden,  
+                  fillColor= ~pal(Count_bawue$n),
+                  fillOpacity = 0.4, 
+                  weight = 2, 
+                  color = "white",
+               popup = ~popup_baden)  %>% 
+
+  addLegend(pal = pal, 
+            values = Count_bawue$n, 
+            position = "bottomleft", 
+            title = "Total Firms Baden-Württemberg")   %>%
+  # addTimeslider(data = bawue_data,
+            # options = timesliderOptions(
+             #  position = "topright",
+              # range = TRUE)) %>% 
+
+  addPolygons(data = bayern, fillColor= ~pal_2(Count_bayern$n),
+                  fillOpacity = 0.4, 
+                  weight = 2, 
+                  color = "white", popup = ~popup_bayern,)%>%
+
+  
+  addLegend(pal = pal_2, 
+            values = Count_bayern$n, 
+            position = "bottomright", 
+            title = "Total Firms Bayern")# %>% 
+ # addTimeslider(data = bayern_data,
+  #           options = timesliderOptions(
+   #            position = "topright",
+    #           range = TRUE)) 
+
+
+
+mymap 
+c(bayern_data$gruendung)
+bayern_data
+class(c(bayern_data$gruendung))
+
+
+```
+
+
+```{r}
+fig = px.scatter_geo(
+    melted_df.fillna(0), 
+    locations ="Municipalities", 
+    color="visitors",
+    size="visitors",
+    # what is the size of the biggest scatter point
+    size_max = 30,
+    projection="firms",
+    # range, important to keep the same range on all charts
+    range_color=(0, 100000000),
+    # columns which is in bold in the pop up
+    hover_name = "Municipalities",
+    # format of the popup not to display these columns' data
+    hover_data = {"Country Name":False, "Country Code": False},
+    title="International Tourism",
+    animation_frame="years"
+                     )
+fig.update_geos(showcountries = True)
+fig.show()
+```
+
+
+
+
+
+```{r}
+ui <- fluidPage( titlePanel("Bayern and Baden-Wurtemberg Firms"),
+  leafletOutput("mymap"), 
+  p()
+  
+)
+
+server <- function(input, output, session) {
+
+  points <- eventReactive(input$recalc, {
+    cbind(rnorm(40) * 2 + 13, rnorm(40) + 48)
+  }, ignoreNULL = FALSE)
+
+  output$mymap <- renderLeaflet({
+    leaflet() %>% addPolygons(data = baden,  
+                  fillColor= ~pal(Count_bawue$n),
+                  fillOpacity = 0.4, 
+                  weight = 2, 
+                  color = "white",
+               popup = ~popup_baden)  %>% 
+
+  addLegend(pal = pal, 
+            values = Count_bawue$n, 
+            position = "bottomleft", 
+            title = "Total Firms Baden-Württemberg")   %>%
+
+  addPolygons(data = bayern, fillColor= ~pal_2(Count_bayern$n),
+                  fillOpacity = 0.4, 
+                  weight = 2, 
+                  color = "white", popup = ~popup_bayern,)%>%
+  addLegend(pal = pal_2, 
+            values = Count_bayern$n, 
+            position = "bottomright", 
+            title = "Total Firms Bayern") 
+
+mymap
+    
+ 
+      
+  })
+}
+
+
+
+
+ 
+shinyApp(ui, server)
+```
+
