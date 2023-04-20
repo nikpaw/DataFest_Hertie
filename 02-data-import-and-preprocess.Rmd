@@ -1,6 +1,6 @@
 ---
 title: "New_Dataset"
-author: "Alvaro Guijarro"
+author: "Niklas Pawelzik, Alvaro Guijarro"
 date: "`r Sys.Date()`"
 output: html_document
 ---
